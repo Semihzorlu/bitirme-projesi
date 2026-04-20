@@ -1,0 +1,20 @@
+# Bağımlılıklar
+node_modules/
+
+# Build çıktıları
+dist/
+build/
+
+# Ortam dosyaları
+.env
+.env.local
+
+# VS Code
+.vscode/
+
+# Sistem dosyaları
+.DS_Store
+Thumbs.db
+
+# Loglar
+*.log
