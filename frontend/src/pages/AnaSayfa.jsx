@@ -1,12 +1,20 @@
+import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
+import { urunleriGetir } from '../services/api';
 
 function AnaSayfa() {
-  const urunler = [
-    { id: 1, ad: "Deri Mont", fiyat: 1299, resim: "https://placehold.co/300x400/222/fff?text=Mont" },
-    { id: 2, ad: "Kışlık Bot", fiyat: 899, resim: "https://placehold.co/300x400/444/fff?text=Bot" },
-    { id: 3, ad: "Kazak", fiyat: 449, resim: "https://placehold.co/300x400/666/fff?text=Kazak" },
-    { id: 4, ad: "Pantolon", fiyat: 599, resim: "https://placehold.co/300x400/888/fff?text=Pantolon" },
-  ];
+  const [urunler, setUrunler] = useState([]);
+  const [yukleniyor, setYukleniyor] = useState(true);
+
+  // Sayfa açıldığında backend'den ürünleri çek
+  useEffect(() => {
+    async function verileriGetir() {
+      const veri = await urunleriGetir();
+      setUrunler(veri);
+      setYukleniyor(false);
+    }
+    verileriGetir();
+  }, []);
 
   return (
     <div>
@@ -26,20 +34,38 @@ function AnaSayfa() {
       {/* Ürün Listesi */}
       <section className="max-w-6xl mx-auto px-4 py-12">
         <h3 className="text-3xl font-bold mb-8 text-gray-800">Öne Çıkan Ürünler</h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-          {urunler.map((urun) => (
-            <div key={urun.id} className="bg-white rounded-lg shadow-md overflow-hidden hover:shadow-xl transition">
-              <img src={urun.resim} alt={urun.ad} className="w-full h-64 object-cover" />
-              <div className="p-4">
-                <h4 className="font-semibold text-lg text-gray-800">{urun.ad}</h4>
-                <p className="text-indigo-600 font-bold text-xl mt-2">{urun.fiyat} ₺</p>
-                <button className="mt-3 w-full bg-indigo-600 text-white py-2 rounded hover:bg-indigo-700">
-                  Sepete Ekle
-                </button>
+
+        {yukleniyor ? (
+          // Yükleniyor durumu
+          <div className="text-center py-20">
+            <div className="inline-block animate-spin rounded-full h-12 w-12 border-4 border-indigo-600 border-t-transparent"></div>
+            <p className="mt-4 text-gray-600">Ürünler yükleniyor...</p>
+          </div>
+        ) : urunler.length === 0 ? (
+          // Ürün bulunamadı durumu (backend kapalıysa)
+          <div className="text-center py-20 bg-red-50 rounded-lg">
+            <p className="text-red-600 font-semibold">⚠️ Backend'e bağlanılamadı.</p>
+            <p className="text-gray-600 mt-2">Backend sunucusunun çalıştığından emin ol (uvicorn main:app --reload)</p>
+          </div>
+        ) : (
+          // Ürün kartları
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            {urunler.map((urun) => (
+              <div key={urun.id} className="bg-white rounded-lg shadow-md overflow-hidden hover:shadow-xl transition">
+                <img src={urun.resim} alt={urun.ad} className="w-full h-64 object-cover" />
+                <div className="p-4">
+                  <span className="text-xs text-indigo-600 font-semibold uppercase">{urun.kategori}</span>
+                  <h4 className="font-semibold text-lg text-gray-800 mt-1">{urun.ad}</h4>
+                  <p className="text-gray-500 text-sm mt-1 line-clamp-2">{urun.aciklama}</p>
+                  <p className="text-indigo-600 font-bold text-xl mt-2">{urun.fiyat} ₺</p>
+                  <button className="mt-3 w-full bg-indigo-600 text-white py-2 rounded hover:bg-indigo-700">
+                    Sepete Ekle
+                  </button>
+                </div>
               </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
       </section>
     </div>
   );

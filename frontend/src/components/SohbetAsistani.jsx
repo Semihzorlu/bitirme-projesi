@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
+import { mesajGonder as apiMesajGonder } from '../services/api';
 
 function SohbetAsistani() {
   const [acik, setAcik] = useState(false);
@@ -14,7 +15,8 @@ function SohbetAsistani() {
     sonMesajRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [mesajlar, yaziyor]);
 
-  const mesajGonder = () => {
+  // Mesaj gönderme (Backend'e bağlı)
+  const mesajGonder = async () => {
     if (!girdi.trim()) return;
 
     // Kullanıcının mesajını ekle
@@ -24,27 +26,19 @@ function SohbetAsistani() {
       metin: girdi
     };
     setMesajlar(prev => [...prev, yeniKullaniciMesaji]);
+    const gonderilecekMetin = girdi;
     setGirdi('');
     setYaziyor(true);
 
-    // Bot cevabını simüle et (Backend gelince gerçek AI'ye bağlanacak)
-    setTimeout(() => {
-      const botCevaplari = [
-        'Senin için en uygun ürünleri buldum. Şu anda stoklarımızda kışlık montlar var. Göstermemi ister misin?',
-        'Harika bir seçim! Bu kategoride sana 5 farklı ürün önerebilirim.',
-        'Anladım, hemen araştırıyorum... Bütçene uygun alternatiflerim var.',
-        'Tercihlerini not ettim. Bir sonraki önerilerim daha isabetli olacak. 🎯',
-        'Bu ürünün benzerlerini görmek ister misin? "Görsel Ara" ile fotoğraf yükleyebilirsin.',
-      ];
-      const rastgeleCevap = botCevaplari[Math.floor(Math.random() * botCevaplari.length)];
+    // Backend'e istek at ve cevabı al
+    const botCevabi = await apiMesajGonder(gonderilecekMetin);
 
-      setMesajlar(prev => [...prev, {
-        id: Date.now() + 1,
-        kimden: 'bot',
-        metin: rastgeleCevap
-      }]);
-      setYaziyor(false);
-    }, 1200);
+    setMesajlar(prev => [...prev, {
+      id: Date.now() + 1,
+      kimden: 'bot',
+      metin: botCevabi
+    }]);
+    setYaziyor(false);
   };
 
   // Enter tuşuyla gönderme
