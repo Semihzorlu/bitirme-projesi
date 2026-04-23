@@ -1,11 +1,17 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy.orm import Session
+from database import engine, get_db, Base
+import models
 
-# FastAPI uygulamasını başlat
-app = FastAPI(title="Akıllı E-Ticaret API", version="1.0")
+# Tabloları oluştur (varsa atla)
+# Zaten Supabase'de manuel oluşturduk, bu satır güvenlik önlemi
+Base.metadata.create_all(bind=engine)
 
-# CORS Ayarı: Frontend'in (localhost:5173) backend'e erişmesine izin ver
-# Bu olmadan tarayıcı güvenlik nedeniyle bağlantıyı engeller
+# FastAPI uygulaması
+app = FastAPI(title="Akıllı E-Ticaret API", version="2.0")
+
+# CORS ayarı
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173"],
@@ -15,62 +21,80 @@ app.add_middleware(
 )
 
 
-# ============ ÖRNEK ÜRÜN VERİSİ (Şimdilik hafızada) ============
-# Not: Veritabanını sonraki adımda bağlayacağız
-urunler_db = [
-    {"id": 1, "ad": "Deri Mont", "fiyat": 1299, "kategori": "Dış Giyim",
-     "resim": "https://placehold.co/300x400/222/fff?text=Mont",
-     "aciklama": "Gerçek deri, su geçirmez kışlık mont."},
-    {"id": 2, "ad": "Kışlık Bot", "fiyat": 899, "kategori": "Ayakkabı",
-     "resim": "https://placehold.co/300x400/444/fff?text=Bot",
-     "aciklama": "Termal astar, kaymaz taban."},
-    {"id": 3, "ad": "Kazak", "fiyat": 449, "kategori": "Üst Giyim",
-     "resim": "https://placehold.co/300x400/666/fff?text=Kazak",
-     "aciklama": "%100 yün, nefes alabilir kumaş."},
-    {"id": 4, "ad": "Pantolon", "fiyat": 599, "kategori": "Alt Giyim",
-     "resim": "https://placehold.co/300x400/888/fff?text=Pantolon",
-     "aciklama": "Slim fit, dayanıklı pamuklu."},
-    {"id": 5, "ad": "Tişört", "fiyat": 199, "kategori": "Üst Giyim",
-     "resim": "https://placehold.co/300x400/aaa/fff?text=Tisort",
-     "aciklama": "Oversize kesim, %100 pamuk."},
-    {"id": 6, "ad": "Sneaker", "fiyat": 1499, "kategori": "Ayakkabı",
-     "resim": "https://placehold.co/300x400/ccc/333?text=Sneaker",
-     "aciklama": "Günlük kullanım için hafif spor ayakkabı."},
-]
-
-
-# ============ API ENDPOINTS (Uç Noktalar) ============
+# ============ API ENDPOINTS ============
 
 @app.get("/")
 def ana_sayfa():
-    """Sağlık kontrolü — API çalışıyor mu?"""
-    return {"mesaj": "Akıllı E-Ticaret API çalışıyor ✅"}
+    """Sağlık kontrolü"""
+    return {"mesaj": "Akıllı E-Ticaret API çalışıyor ✅", "versiyon": "2.0 (Veritabanı bağlı)"}
 
 
 @app.get("/products")
-def urunleri_getir():
-    """Tüm ürünleri döndürür"""
-    return {"toplam": len(urunler_db), "urunler": urunler_db}
+def urunleri_getir(db: Session = Depends(get_db)):
+    """Tüm ürünleri veritabanından getirir"""
+    urunler = db.query(models.Urun).all()
+    
+    # SQLAlchemy nesnelerini dict'e çevir (frontend'in anlayacağı formata)
+    urunler_listesi = [
+        {
+            "id": u.id,
+            "ad": u.ad,
+            "aciklama": u.aciklama,
+            "fiyat": float(u.fiyat),  # DECIMAL → float
+            "kategori": u.kategori,
+            "resim": u.resim_url,
+            "stok_adedi": u.stok_adedi
+        }
+        for u in urunler
+    ]
+    
+    return {"toplam": len(urunler_listesi), "urunler": urunler_listesi}
 
 
 @app.get("/products/{urun_id}")
-def urun_detay(urun_id: int):
-    """Belirli bir ürünün detaylarını döndürür"""
-    for urun in urunler_db:
-        if urun["id"] == urun_id:
-            return urun
-    return {"hata": "Ürün bulunamadı"}
+def urun_detay(urun_id: int, db: Session = Depends(get_db)):
+    """Belirli bir ürünün detaylarını getirir"""
+    urun = db.query(models.Urun).filter(models.Urun.id == urun_id).first()
+    
+    if not urun:
+        raise HTTPException(status_code=404, detail="Ürün bulunamadı")
+    
+    return {
+        "id": urun.id,
+        "ad": urun.ad,
+        "aciklama": urun.aciklama,
+        "fiyat": float(urun.fiyat),
+        "kategori": urun.kategori,
+        "resim": urun.resim_url,
+        "stok_adedi": urun.stok_adedi
+    }
+
+
+@app.get("/products/kategori/{kategori_adi}")
+def kategoriye_gore_urunler(kategori_adi: str, db: Session = Depends(get_db)):
+    """Belirli bir kategorideki ürünleri döndürür"""
+    urunler = db.query(models.Urun).filter(models.Urun.kategori == kategori_adi).all()
+    
+    return {
+        "kategori": kategori_adi,
+        "toplam": len(urunler),
+        "urunler": [
+            {
+                "id": u.id,
+                "ad": u.ad,
+                "fiyat": float(u.fiyat),
+                "resim": u.resim_url
+            }
+            for u in urunler
+        ]
+    }
 
 
 @app.post("/chat")
 def sohbet(mesaj: dict):
-    """
-    Sohbet asistanı endpoint'i
-    Şimdilik basit cevaplar veriyor, ilerde OpenAI/Gemini API'ye bağlayacağız
-    """
+    """Sohbet asistanı — şimdilik anahtar kelime eşleştirmesi"""
     kullanici_mesaji = mesaj.get("metin", "").lower()
 
-    # Basit anahtar kelime eşleştirmesi
     if "merhaba" in kullanici_mesaji or "selam" in kullanici_mesaji:
         cevap = "Merhaba! Sana nasıl yardımcı olabilirim? 😊"
     elif "mont" in kullanici_mesaji or "kışlık" in kullanici_mesaji:
