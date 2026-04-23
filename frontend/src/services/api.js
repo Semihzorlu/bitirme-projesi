@@ -44,3 +44,27 @@ export async function mesajGonder(metin) {
     return "Üzgünüm, şu an sunucuya bağlanamıyorum. Lütfen tekrar dene.";
   }
 }
+// ============ GÖRSEL ARAMA FONKSİYONU ============
+
+// Fotoğraf yükle ve benzer ürünleri al
+export async function gorselleAra(dosya) {
+  try {
+    const formData = new FormData();
+    formData.append("file", dosya);
+    
+    const response = await fetch(`${API_URL}/visual-search`, {
+      method: "POST",
+      body: formData,
+    });
+    
+    if (!response.ok) {
+      throw new Error("Görsel arama başarısız oldu");
+    }
+    
+    const data = await response.json();
+    return data.sonuclar;
+  } catch (error) {
+    console.error("Görsel arama hatası:", error);
+    return [];
+  }
+}

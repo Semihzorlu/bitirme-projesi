@@ -1,42 +1,61 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
+import { gorselleAra } from '../services/api';
 
 function GorselAra() {
   const [yuklenenResim, setYuklenenResim] = useState(null);
+  const [yuklenenDosya, setYuklenenDosya] = useState(null);
   const [yukleniyor, setYukleniyor] = useState(false);
   const [sonuclar, setSonuclar] = useState([]);
+  const [hata, setHata] = useState('');
+  const inputRef = useRef(null);
 
-  // Kullanıcı fotoğraf seçtiğinde çalışır
   const handleResimSec = (event) => {
     const dosya = event.target.files[0];
     if (dosya) {
+      if (dosya.size > 5 * 1024 * 1024) {
+        setHata('Dosya boyutu 5 MB\'dan büyük olamaz');
+        return;
+      }
+      
       const resimUrl = URL.createObjectURL(dosya);
       setYuklenenResim(resimUrl);
-      setSonuclar([]); // Eski sonuçları temizle
+      setYuklenenDosya(dosya);
+      setSonuclar([]);
+      setHata('');
     }
   };
 
-  // "Benzerleri Bul" butonuna tıklandığında çalışır
-  const handleArama = () => {
-    if (!yuklenenResim) return;
+  const handleArama = async () => {
+    if (!yuklenenDosya) return;
     
     setYukleniyor(true);
+    setHata('');
     
-    // Şimdilik sahte sonuç dönüyoruz (Backend bağlanınca gerçek olacak)
-    setTimeout(() => {
-      setSonuclar([
-        { id: 1, ad: "Benzer Ürün 1", fiyat: 799, benzerlik: 94, resim: "https://placehold.co/300x400/333/fff?text=Benzer+1" },
-        { id: 2, ad: "Benzer Ürün 2", fiyat: 649, benzerlik: 89, resim: "https://placehold.co/300x400/555/fff?text=Benzer+2" },
-        { id: 3, ad: "Benzer Ürün 3", fiyat: 899, benzerlik: 85, resim: "https://placehold.co/300x400/777/fff?text=Benzer+3" },
-        { id: 4, ad: "Benzer Ürün 4", fiyat: 579, benzerlik: 81, resim: "https://placehold.co/300x400/999/fff?text=Benzer+4" },
-      ]);
-      setYukleniyor(false);
-    }, 1500); // 1.5 saniye bekle (gerçek AI işlemi gibi)
+    // Gerçek AI'ye istek at
+    const benzerUrunler = await gorselleAra(yuklenenDosya);
+    
+    if (benzerUrunler.length === 0) {
+      setHata('Benzer ürün bulunamadı veya bağlantı hatası oluştu');
+    } else {
+      setSonuclar(benzerUrunler);
+    }
+    
+    setYukleniyor(false);
+  };
+
+  const handleSifirla = () => {
+    setYuklenenResim(null);
+    setYuklenenDosya(null);
+    setSonuclar([]);
+    setHata('');
+    if (inputRef.current) inputRef.current.value = '';
   };
 
   return (
     <div className="max-w-6xl mx-auto px-4 py-12">
       <h2 className="text-4xl font-bold text-gray-800 mb-2">Görsel ile Ara</h2>
-      <p className="text-gray-600 mb-8">Beğendiğin bir kıyafetin fotoğrafını yükle, yapay zekâ sana benzer ürünleri bulsun.</p>
+      <p className="text-gray-600 mb-2">Beğendiğin bir kıyafetin fotoğrafını yükle, yapay zekâ sana benzer ürünleri bulsun.</p>
+      <p className="text-sm text-indigo-600 mb-8">🤖 OpenAI CLIP + pgvector ile çalışır</p>
 
       {/* Yükleme Alanı */}
       <div className="bg-white rounded-lg shadow-md p-8 mb-8">
@@ -46,6 +65,7 @@ function GorselAra() {
             <p className="text-lg text-gray-700 font-semibold mb-2">Fotoğraf Yüklemek için Tıkla</p>
             <p className="text-sm text-gray-500">JPG, PNG — Maksimum 5 MB</p>
             <input
+              ref={inputRef}
               type="file"
               accept="image/*"
               onChange={handleResimSec}
@@ -65,10 +85,10 @@ function GorselAra() {
                 disabled={yukleniyor}
                 className="bg-indigo-600 text-white px-8 py-3 rounded-lg font-semibold hover:bg-indigo-700 disabled:bg-gray-400"
               >
-                {yukleniyor ? "Aranıyor..." : "🔍 Benzerleri Bul"}
+                {yukleniyor ? "🤖 AI analiz ediyor..." : "🔍 Benzerleri Bul"}
               </button>
               <button
-                onClick={() => { setYuklenenResim(null); setSonuclar([]); }}
+                onClick={handleSifirla}
                 className="bg-gray-200 text-gray-700 px-8 py-3 rounded-lg font-semibold hover:bg-gray-300"
               >
                 Değiştir
@@ -78,6 +98,13 @@ function GorselAra() {
         )}
       </div>
 
+      {/* Hata Mesajı */}
+      {hata && (
+        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mb-6">
+          ⚠️ {hata}
+        </div>
+      )}
+
       {/* Sonuçlar */}
       {sonuclar.length > 0 && (
         <div>
@@ -86,13 +113,18 @@ function GorselAra() {
             {sonuclar.map((urun) => (
               <div key={urun.id} className="bg-white rounded-lg shadow-md overflow-hidden hover:shadow-xl transition">
                 <div className="relative">
-                  <img src={urun.resim} alt={urun.ad} className="w-full h-64 object-cover" />
+                  <img
+                    src={urun.resim || 'https://placehold.co/300x400/eee/333?text=Resim+Yok'}
+                    alt={urun.ad}
+                    className="w-full h-64 object-cover"
+                  />
                   <span className="absolute top-2 right-2 bg-green-500 text-white px-3 py-1 rounded-full text-sm font-semibold">
                     %{urun.benzerlik}
                   </span>
                 </div>
                 <div className="p-4">
-                  <h4 className="font-semibold text-lg text-gray-800">{urun.ad}</h4>
+                  <span className="text-xs text-indigo-600 font-semibold uppercase">{urun.kategori}</span>
+                  <h4 className="font-semibold text-lg text-gray-800 mt-1">{urun.ad}</h4>
                   <p className="text-indigo-600 font-bold text-xl mt-2">{urun.fiyat} ₺</p>
                   <button className="mt-3 w-full bg-indigo-600 text-white py-2 rounded hover:bg-indigo-700">
                     Sepete Ekle

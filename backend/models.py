@@ -1,5 +1,6 @@
 from sqlalchemy import Column, Integer, String, Text, DECIMAL, TIMESTAMP, ForeignKey
 from sqlalchemy.sql import func
+from pgvector.sqlalchemy import Vector
 from database import Base
 
 
@@ -15,6 +16,9 @@ class Urun(Base):
     resim_url = Column(Text)
     stok_adedi = Column(Integer, default=0)
     olusturulma_tarihi = Column(TIMESTAMP, server_default=func.now())
+    
+    # Yeni: Görsel arama için embedding vektörü (2000 boyut)
+    embedding = Column(Vector(512))
 
 
 class Kullanici(Base):
