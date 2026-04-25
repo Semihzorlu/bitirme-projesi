@@ -30,6 +30,9 @@ export async function urunDetayGetir(id) {
 // ============ SOHBET FONKSİYONU ============
 
 // Chat mesajı gönder ve cevap al
+// Chat mesajı gönder ve cevap + ürünleri al
+// Chat mesajı gönder + konuşma geçmişi
+// Chat mesajı gönder ve cevap + ürünleri al
 export async function mesajGonder(metin) {
   try {
     const response = await fetch(`${API_URL}/chat`, {
@@ -38,10 +41,16 @@ export async function mesajGonder(metin) {
       body: JSON.stringify({ metin: metin }),
     });
     const data = await response.json();
-    return data.cevap;
+    return {
+      cevap: data.cevap || "",
+      onerilen_urunler: data.onerilen_urunler || []
+    };
   } catch (error) {
     console.error("Mesaj gönderilemedi:", error);
-    return "Üzgünüm, şu an sunucuya bağlanamıyorum. Lütfen tekrar dene.";
+    return {
+      cevap: "Üzgünüm, şu an sunucuya bağlanamıyorum. Lütfen tekrar dene.",
+      onerilen_urunler: []
+    };
   }
 }
 // ============ GÖRSEL ARAMA FONKSİYONU ============

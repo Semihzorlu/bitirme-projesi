@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 from database import engine, get_db, Base
+from chat_service import sohbet_et
 import models
 from vector_service import resim_vektoru_cikar
 
@@ -93,22 +94,19 @@ def kategoriye_gore_urunler(kategori_adi: str, db: Session = Depends(get_db)):
 
 
 @app.post("/chat")
-def sohbet(mesaj: dict):
-    """Sohbet asistanı — şimdilik anahtar kelime eşleştirmesi"""
-    kullanici_mesaji = mesaj.get("metin", "").lower()
-
-    if "merhaba" in kullanici_mesaji or "selam" in kullanici_mesaji:
-        cevap = "Merhaba! Sana nasıl yardımcı olabilirim? 😊"
-    elif "mont" in kullanici_mesaji or "kışlık" in kullanici_mesaji:
-        cevap = "Kışlık ürünlerimiz arasında deri montumuz ve botumuz öne çıkıyor. İncelemek ister misin?"
-    elif "fiyat" in kullanici_mesaji or "ucuz" in kullanici_mesaji:
-        cevap = "En uygun fiyatlı ürünümüz 199 TL'den başlayan tişörtlerimiz."
-    elif "teşekkür" in kullanici_mesaji:
-        cevap = "Rica ederim! Başka bir konuda yardım ister misin?"
-    else:
-        cevap = "Anladım. Ürünlerimizi incelemek için 'Görsel Ara' sayfasına da göz atabilirsin."
-
-    return {"cevap": cevap}
+def sohbet(mesaj: dict, db: Session = Depends(get_db)):
+    """
+    Sohbet asistanı — RAG (CLIP + Gemini + pgvector)
+    """
+    kullanici_mesaji = mesaj.get("metin", "").strip()
+    
+    if not kullanici_mesaji:
+        return {"cevap": "Lütfen bir mesaj yaz 😊", "onerilen_urunler": []}
+    
+    from chat_service import sohbet_et
+    sonuc = sohbet_et(kullanici_mesaji, db)
+    
+    return sonuc
 
 @app.post("/visual-search")
 async def gorsel_ara(file: UploadFile = File(...), db: Session = Depends(get_db)):
