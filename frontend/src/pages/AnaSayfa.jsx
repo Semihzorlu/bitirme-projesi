@@ -51,18 +51,34 @@ function AnaSayfa() {
           // Ürün kartları
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
             {urunler.map((urun) => (
-              <div key={urun.id} className="bg-white rounded-lg shadow-md overflow-hidden hover:shadow-xl transition">
-                <img src={urun.resim} alt={urun.ad} className="w-full h-64 object-cover" />
+              <Link
+                key={urun.id}
+                to={`/urun/${urun.id}`}
+                className="bg-white rounded-lg shadow-md overflow-hidden hover:shadow-xl transition group"
+              >
+                <div className="overflow-hidden">
+                  <img
+                    src={urun.resim}
+                    alt={urun.ad}
+                    className="w-full h-64 object-cover group-hover:scale-105 transition duration-300"
+                  />
+                </div>
                 <div className="p-4">
                   <span className="text-xs text-indigo-600 font-semibold uppercase">{urun.kategori}</span>
                   <h4 className="font-semibold text-lg text-gray-800 mt-1">{urun.ad}</h4>
                   <p className="text-gray-500 text-sm mt-1 line-clamp-2">{urun.aciklama}</p>
                   <p className="text-indigo-600 font-bold text-xl mt-2">{urun.fiyat} ₺</p>
-                  <button className="mt-3 w-full bg-indigo-600 text-white py-2 rounded hover:bg-indigo-700">
+                  <button
+                    onClick={(e) => {
+                      e.preventDefault(); // Linke tıklamayı durdur
+                      // İleride sepete ekleme buraya gelecek
+                    }}
+                    className="mt-3 w-full bg-indigo-600 text-white py-2 rounded hover:bg-indigo-700"
+                  >
                     Sepete Ekle
                   </button>
                 </div>
-              </div>
+              </Link>
             ))}
           </div>
         )}

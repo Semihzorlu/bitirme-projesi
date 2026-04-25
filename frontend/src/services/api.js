@@ -77,3 +77,17 @@ export async function gorselleAra(dosya) {
     return [];
   }
 }
+
+// ============ ÖNERİ SİSTEMİ FONKSİYONLARI ============
+
+// Bir ürüne benzer ürünleri getir (Content-Based)
+export async function benzerUrunleriGetir(urunId, limit = 6) {
+  try {
+    const response = await fetch(`${API_URL}/products/${urunId}/similar?limit=${limit}`);
+    const data = await response.json();
+    return data.benzer_urunler || [];
+  } catch (error) {
+    console.error("Benzer ürünler alınamadı:", error);
+    return [];
+  }
+}

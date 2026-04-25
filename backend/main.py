@@ -300,3 +300,121 @@ def eksik_vektorleri_olustur(db: Session = Depends(get_db)):
         "basarisiz": basarisiz,
         "toplam_islenen": len(eksik_urunler)
     }
+@app.get("/products/{urun_id}/similar")
+def benzer_urunler(urun_id: int, limit: int = 6, db: Session = Depends(get_db)):
+    """
+    Bir ürüne benzer ürünleri pgvector + kategori önceliği ile bulur.
+    
+    Tiered Re-Ranking:
+    1. Aynı kategori (en üstte)
+    2. İlişkili kategori (orta)  
+    3. Farklı kategori (en altta)
+    Her grup içinde görsel benzerlik skoruna göre sıralanır.
+    """
+    urun = db.query(models.Urun).filter(models.Urun.id == urun_id).first()
+    
+    if not urun:
+        raise HTTPException(status_code=404, detail="Ürün bulunamadı")
+    
+    if urun.embedding is None:
+        return {
+            "mesaj": "Bu ürün için henüz öneri hazır değil",
+            "benzer_urunler": []
+        }
+    
+    # Geniş aday havuzu çek (yeniden sıralama için)
+    aday_sql = text("""
+        SELECT id, ad, aciklama, fiyat, kategori, resim_url,
+               1 - (embedding <=> (
+                   SELECT embedding FROM urunler WHERE id = :urun_id
+               )) AS gorsel_benzerlik
+        FROM urunler
+        WHERE id != :urun_id 
+          AND embedding IS NOT NULL
+        ORDER BY embedding <=> (
+            SELECT embedding FROM urunler WHERE id = :urun_id
+        )
+        LIMIT :geniş_limit
+    """)
+    
+    adaylar = db.execute(
+        aday_sql, 
+        {"urun_id": urun_id, "geniş_limit": limit * 4}
+    ).fetchall()
+    
+    # Kategori grupları
+    kategori_gruplari = {
+        "Üst Giyim": ["Üst Giyim", "Dış Giyim"],
+        "Alt Giyim": ["Alt Giyim"],
+        "Dış Giyim": ["Dış Giyim", "Üst Giyim"],
+        "Ayakkabı": ["Ayakkabı"],
+        "Aksesuar": ["Aksesuar"],
+    }
+    
+    hedef_kategori = urun.kategori
+    iliski_kategorileri = kategori_gruplari.get(hedef_kategori, [hedef_kategori])
+    
+    # Adayları kategori uyumuna göre 3 gruba ayır
+    ayni_kategori = []
+    iliskili_kategori = []
+    farkli_kategori = []
+    
+    for row in adaylar:
+        gorsel_skor = float(row.gorsel_benzerlik)
+        
+        urun_dict = {
+            "id": row.id,
+            "ad": row.ad,
+            "aciklama": row.aciklama or "",
+            "fiyat": float(row.fiyat),
+            "kategori": row.kategori or "",
+            "resim": row.resim_url or "",
+            "ham_skor": gorsel_skor
+        }
+        
+        if row.kategori == hedef_kategori:
+            ayni_kategori.append(urun_dict)
+        elif row.kategori in iliski_kategorileri:
+            iliskili_kategori.append(urun_dict)
+        else:
+            farkli_kategori.append(urun_dict)
+    
+    # Her grup içinde görsel skora göre sırala
+    ayni_kategori.sort(key=lambda x: x["ham_skor"], reverse=True)
+    iliskili_kategori.sort(key=lambda x: x["ham_skor"], reverse=True)
+    farkli_kategori.sort(key=lambda x: x["ham_skor"], reverse=True)
+    
+    # Grupları birleştir: önce aynı kategori, sonra ilişkili, sonra farklı
+    siralanmis = ayni_kategori + iliskili_kategori + farkli_kategori
+    siralanmis = siralanmis[:limit]
+    
+    # Yüzdeleri normalize et
+    # Aynı kategori → 75-95 arası
+    # İlişkili kategori → 55-75 arası
+    # Farklı kategori → 35-55 arası
+    sonuc = []
+    for urun_dict in siralanmis:
+        if urun_dict in ayni_kategori:
+            # Aynı kategori grubu için 75-95 aralığı
+            yuzde = 75 + (urun_dict["ham_skor"] * 20)
+        elif urun_dict in iliskili_kategori:
+            # İlişkili kategori için 55-75 aralığı
+            yuzde = 55 + (urun_dict["ham_skor"] * 20)
+        else:
+            # Farklı kategori için 35-55 aralığı
+            yuzde = 35 + (urun_dict["ham_skor"] * 20)
+        
+        sonuc.append({
+            "id": urun_dict["id"],
+            "ad": urun_dict["ad"],
+            "aciklama": urun_dict["aciklama"],
+            "fiyat": urun_dict["fiyat"],
+            "kategori": urun_dict["kategori"],
+            "resim": urun_dict["resim"],
+            "benzerlik": round(min(yuzde, 95), 1)  # Max %95 (asla %100)
+        })
+    
+    return {
+        "mesaj": f"{len(sonuc)} benzer ürün bulundu",
+        "benzer_urunler": sonuc
+    }

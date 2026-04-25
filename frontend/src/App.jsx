@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Link } from 'react-router-dom';
 import AnaSayfa from './pages/AnaSayfa';
 import GorselAra from './pages/GorselAra';
 import SohbetAsistani from './components/SohbetAsistani';
+import UrunDetay from './pages/UrunDetay';
 
 function App() {
   return (
@@ -23,6 +24,7 @@ function App() {
         <Routes>
           <Route path="/" element={<AnaSayfa />} />
           <Route path="/gorsel-ara" element={<GorselAra />} />
+          <Route path="/urun/:id" element={<UrunDetay />} />
         </Routes>
 
         <footer className="bg-gray-800 text-white text-center py-6 mt-12">
