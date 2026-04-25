@@ -418,3 +418,96 @@ def benzer_urunler(urun_id: int, limit: int = 6, db: Session = Depends(get_db)):
         "mesaj": f"{len(sonuc)} benzer ürün bulundu",
         "benzer_urunler": sonuc
     }
+@app.post("/interactions/track")
+def etkilesim_kaydet(veri: dict, db: Session = Depends(get_db)):
+    """
+    Kullanıcı etkileşimini kaydeder.
+    Body: { "oturum_id": "uuid", "urun_id": 1, "etkilesim_tipi": "goruntuleme" }
+    
+    Etkileşim tipleri: 'goruntuleme', 'tiklama', 'sepete_ekleme'
+    """
+    oturum_id = veri.get("oturum_id")
+    urun_id = veri.get("urun_id")
+    etkilesim_tipi = veri.get("etkilesim_tipi", "goruntuleme")
+    
+    if not oturum_id or not urun_id:
+        raise HTTPException(status_code=400, detail="oturum_id ve urun_id gerekli")
+    
+    # Aynı oturum aynı ürünü 5 dakika içinde tekrar görüntülemişse kaydetme
+    # (sayfa yenilemelerinde mükerrer kayıt olmasın)
+    son_etkilesim = db.execute(text("""
+        SELECT id FROM etkilesimler
+        WHERE oturum_id = :oturum_id 
+          AND urun_id = :urun_id 
+          AND etkilesim_tipi = :tipi
+          AND tarih > NOW() - INTERVAL '5 minutes'
+        LIMIT 1
+    """), {
+        "oturum_id": oturum_id,
+        "urun_id": urun_id,
+        "tipi": etkilesim_tipi
+    }).fetchone()
+    
+    if son_etkilesim:
+        return {"mesaj": "Yakın zamanda kaydedilmiş, atlandı", "kaydedildi": False}
+    
+    # Yeni etkileşimi ekle
+    yeni_etkilesim = models.Etkilesim(
+        oturum_id=oturum_id,
+        urun_id=urun_id,
+        etkilesim_tipi=etkilesim_tipi
+    )
+    db.add(yeni_etkilesim)
+    db.commit()
+    
+    return {"mesaj": "Etkileşim kaydedildi", "kaydedildi": True}
+
+
+@app.get("/products/{urun_id}/also-viewed")
+def beraber_incelenenler(urun_id: int, limit: int = 6, db: Session = Depends(get_db)):
+    """
+    "Bu ürünü inceleyenler şunları da inceledi" - Collaborative filtering.
+    
+    Mantık:
+    1. Bu ürünü görüntüleyen oturumları bul
+    2. O oturumların görüntülediği DİĞER ürünleri al
+    3. En çok ortak görüntülenen ürünleri sırala
+    """
+    sql = text("""
+        WITH bu_urunu_gorenler AS (
+            SELECT DISTINCT oturum_id 
+            FROM etkilesimler
+            WHERE urun_id = :urun_id
+              AND oturum_id IS NOT NULL
+        )
+        SELECT 
+            u.id, u.ad, u.aciklama, u.fiyat, u.kategori, u.resim_url,
+            COUNT(DISTINCT e.oturum_id) AS ortak_kullanici_sayisi
+        FROM etkilesimler e
+        JOIN urunler u ON u.id = e.urun_id
+        WHERE e.urun_id != :urun_id
+          AND e.oturum_id IN (SELECT oturum_id FROM bu_urunu_gorenler)
+        GROUP BY u.id, u.ad, u.aciklama, u.fiyat, u.kategori, u.resim_url
+        ORDER BY ortak_kullanici_sayisi DESC
+        LIMIT :limit
+    """)
+    
+    sonuclar = db.execute(sql, {"urun_id": urun_id, "limit": limit}).fetchall()
+    
+    beraber_urunler = [
+        {
+            "id": row.id,
+            "ad": row.ad,
+            "aciklama": row.aciklama or "",
+            "fiyat": float(row.fiyat),
+            "kategori": row.kategori or "",
+            "resim": row.resim_url or "",
+            "ortak_kullanici": row.ortak_kullanici_sayisi
+        }
+        for row in sonuclar
+    ]
+    
+    return {
+        "mesaj": f"{len(beraber_urunler)} ürün bulundu",
+        "beraber_incelenenler": beraber_urunler
+    }

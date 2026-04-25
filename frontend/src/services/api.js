@@ -91,3 +91,46 @@ export async function benzerUrunleriGetir(urunId, limit = 6) {
     return [];
   }
 }
+import { oturumIdAl } from './session';
+
+// ============ ETKİLEŞİM TAKİP FONKSİYONLARI ============
+
+/**
+ * Bir ürünle olan etkileşimi backend'e kaydet
+ * @param {number} urunId - Ürün ID'si
+ * @param {string} etkilesimTipi - 'goruntuleme', 'tiklama', 'sepete_ekleme'
+ */
+export async function etkilesimKaydet(urunId, etkilesimTipi = 'goruntuleme') {
+  try {
+    const oturumId = oturumIdAl();
+    
+    await fetch(`${API_URL}/interactions/track`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        oturum_id: oturumId,
+        urun_id: urunId,
+        etkilesim_tipi: etkilesimTipi
+      })
+    });
+  } catch (error) {
+    // Sessiz hata - etkileşim kaydedilemese bile kullanıcı deneyimi etkilenmesin
+    console.error('Etkileşim kaydedilemedi:', error);
+  }
+}
+
+/**
+ * Bu ürünü inceleyenler başka neleri inceledi
+ */
+export async function beraberIncelenenleriGetir(urunId, limit = 6) {
+  try {
+    const response = await fetch(
+      `${API_URL}/products/${urunId}/also-viewed?limit=${limit}`
+    );
+    const data = await response.json();
+    return data.beraber_incelenenler || [];
+  } catch (error) {
+    console.error('Beraber incelenenler alınamadı:', error);
+    return [];
+  }
+}

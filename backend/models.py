@@ -33,11 +33,12 @@ class Kullanici(Base):
 
 
 class Etkilesim(Base):
-    """Kullanıcı-ürün etkileşimleri (ilerde öneri sistemi için)"""
+    """Kullanıcı-ürün etkileşimleri (öneri sistemi için)"""
     __tablename__ = "etkilesimler"
 
     id = Column(Integer, primary_key=True, index=True)
-    kullanici_id = Column(Integer, ForeignKey("kullanicilar.id"))
+    oturum_id = Column(String(255), index=True)  # Anonim oturum ID (UUID)
+    kullanici_id = Column(Integer, ForeignKey("kullanicilar.id"), nullable=True)  # İleride giriş yapılınca dolacak
     urun_id = Column(Integer, ForeignKey("urunler.id"))
-    etkilesim_tipi = Column(String(50))
+    etkilesim_tipi = Column(String(50))  # 'goruntuleme', 'tiklama', 'sepete_ekleme'
     tarih = Column(TIMESTAMP, server_default=func.now())
