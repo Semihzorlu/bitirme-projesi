@@ -151,3 +151,22 @@ export async function trendUrunleriGetir(limit = 4, gun = 7) {
     return [];
   }
 }
+
+/**
+ * Hibrit arama (CLIP + Full-Text Search)
+ */
+export async function urunAra(arama, limit = 20) {
+  try {
+    const response = await fetch(
+      `${API_URL}/products/search?q=${encodeURIComponent(arama)}&limit=${limit}`
+    );
+    const data = await response.json();
+    return {
+      arama_metni: data.arama_metni || arama,
+      sonuclar: data.sonuclar || []
+    };
+  } catch (error) {
+    console.error('Arama hatası:', error);
+    return { arama_metni: arama, sonuclar: [] };
+  }
+}

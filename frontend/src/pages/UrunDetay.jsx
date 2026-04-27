@@ -1,52 +1,69 @@
 import { useState, useEffect } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { 
-  urunDetayGetir, 
-  benzerUrunleriGetir, 
+import { sepeteEkle } from '../services/sepet';
+import Toast from '../components/Toast';
+import {
+  urunDetayGetir,
+  benzerUrunleriGetir,
   beraberIncelenenleriGetir,
-  etkilesimKaydet 
+  etkilesimKaydet
 } from '../services/api';
 
 function UrunDetay() {
   const { id } = useParams();
   const navigate = useNavigate();
-  
+
+
   const [urun, setUrun] = useState(null);
   const [benzerler, setBenzerler] = useState([]);
   const [beraberIncelenenler, setBeraberIncelenenler] = useState([]);
   const [yukleniyor, setYukleniyor] = useState(true);
+  const [toast, setToast] = useState({ mesaj: '', tip: 'success' });
 
   useEffect(() => {
     async function veriYukle() {
       setYukleniyor(true);
-      
+
       // Paralel veri çekme
       const [urunData, benzerData, beraberData] = await Promise.all([
         urunDetayGetir(id),
         benzerUrunleriGetir(id, 6),
         beraberIncelenenleriGetir(id, 6)
       ]);
-      
+
       setUrun(urunData);
       setBenzerler(benzerData);
       setBeraberIncelenenler(beraberData);
       setYukleniyor(false);
-      
+
       // Görüntüleme etkileşimi kaydet (collaborative filtering için)
       if (urunData && !urunData.hata) {
         etkilesimKaydet(parseInt(id), 'goruntuleme');
       }
-      
+
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }
-    
+
     veriYukle();
   }, [id]);
 
   // Sepete ekleme tıklama etkileşimi
   const handleSepeteEkle = () => {
+    if (!urun) return;
+
+    sepeteEkle({
+      id: urun.id,
+      ad: urun.ad,
+      fiyat: urun.fiyat,
+      resim: urun.resim,
+      kategori: urun.kategori
+    });
     etkilesimKaydet(parseInt(id), 'sepete_ekleme');
-    alert('Sepete ekleme özelliği henüz aktif değil. Etkileşim kaydedildi 👍');
+
+    setToast({
+      mesaj: `✓ "${urun.ad}" sepete eklendi`,
+      tip: 'success'
+    });
   };
 
   if (yukleniyor) {
@@ -72,15 +89,23 @@ function UrunDetay() {
   }
 
   return (
+
     <div className="max-w-6xl mx-auto px-4 py-8">
-      
+
+      {/* Toast Bildirim */}
+      <Toast
+        mesaj={toast.mesaj}
+        tip={toast.tip}
+        onClose={() => setToast({ mesaj: '', tip: 'success' })}
+      />
+
       <button
         onClick={() => navigate(-1)}
         className="mb-6 text-indigo-600 hover:text-indigo-800 flex items-center gap-2 transition"
       >
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M19 12H5"/>
-          <path d="m12 19-7-7 7-7"/>
+          <path d="M19 12H5" />
+          <path d="m12 19-7-7 7-7" />
         </svg>
         Geri Dön
       </button>
@@ -88,7 +113,7 @@ function UrunDetay() {
       {/* Ürün Detay Kartı */}
       <div className="bg-white rounded-2xl shadow-lg overflow-hidden mb-12">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-8 p-8">
-          
+
           <div className="bg-gray-50 rounded-xl overflow-hidden flex items-center justify-center min-h-[400px]">
             {urun.resim ? (
               <img src={urun.resim} alt={urun.ad} className="w-full h-full object-cover" />
@@ -101,7 +126,7 @@ function UrunDetay() {
             <span className="text-sm text-indigo-600 font-bold uppercase tracking-wider mb-2">
               {urun.kategori}
             </span>
-            
+
             <h1 className="text-4xl font-bold text-gray-800 mb-4">{urun.ad}</h1>
 
             <p className="text-gray-600 leading-relaxed mb-6">{urun.aciklama}</p>
@@ -123,7 +148,7 @@ function UrunDetay() {
             </div>
 
             <div className="flex gap-3 mt-auto">
-              <button 
+              <button
                 onClick={handleSepeteEkle}
                 className="flex-1 bg-indigo-600 text-white py-3 rounded-lg hover:bg-indigo-700 font-semibold transition"
               >
@@ -229,7 +254,7 @@ function UrunDetay() {
       {beraberIncelenenler.length === 0 && (
         <div className="mb-12 bg-blue-50 border border-blue-200 rounded-lg p-4 text-center">
           <p className="text-blue-700 text-sm">
-            💡 <strong>"Bu ürünü inceleyenler"</strong> önerisi için yeterli veri yok. 
+            💡 <strong>"Bu ürünü inceleyenler"</strong> önerisi için yeterli veri yok.
             Birkaç ürünü inceledikten sonra burada öneriler görünecek.
           </p>
         </div>

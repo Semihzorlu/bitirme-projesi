@@ -53,18 +53,13 @@ function SohbetAsistani() {
     }
   };
 
-  // Temizleme onay modalını aç
-  const temizleOnayAc = () => {
-    setTemizleOnayGoster(true);
-  };
-
-  // Onaylanırsa sohbeti temizle
+  const temizleOnayAc = () => setTemizleOnayGoster(true);
+  
   const sohbetiTemizle = () => {
     setMesajlar([HOSGELDIN_MESAJI]);
     setTemizleOnayGoster(false);
   };
 
-  // Sadece hoşgeldin mesajı varsa buton pasif olsun
   const temizlemeButonuPasif = mesajlar.length <= 1;
 
   return (
@@ -81,14 +76,12 @@ function SohbetAsistani() {
       {acik && (
         <div className="fixed bottom-6 right-6 w-96 h-[600px] bg-white rounded-2xl shadow-2xl flex flex-col z-50 border border-gray-200 overflow-hidden">
           
-          {/* Başlık */}
           <div className="bg-gradient-to-r from-indigo-600 to-purple-600 text-white p-4 flex justify-between items-center flex-shrink-0">
             <div>
               <h3 className="font-bold text-lg">AI Asistan</h3>
               <p className="text-xs text-indigo-100">✨ Gemini + CLIP ile çalışır</p>
             </div>
             <div className="flex items-center gap-1">
-              {/* Temizleme butonu - SVG ikon ile profesyonel görünüm */}
               <button
                 onClick={temizleOnayAc}
                 disabled={temizlemeButonuPasif}
@@ -107,7 +100,6 @@ function SohbetAsistani() {
                   <line x1="14" y1="11" x2="14" y2="17"/>
                 </svg>
               </button>
-              {/* Kapat butonu */}
               <button
                 onClick={() => setAcik(false)}
                 title="Kapat"
@@ -121,7 +113,6 @@ function SohbetAsistani() {
             </div>
           </div>
 
-          {/* Mesajlar Alanı */}
           <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-gray-50">
             {mesajlar.map((mesaj) => (
               <div key={mesaj.id}>
@@ -175,7 +166,6 @@ function SohbetAsistani() {
             <div ref={sonMesajRef}></div>
           </div>
 
-          {/* Giriş Alanı */}
           <div className="p-3 border-t bg-white flex-shrink-0">
             <div className="flex gap-2">
               <input
@@ -197,11 +187,9 @@ function SohbetAsistani() {
             </div>
           </div>
 
-          {/* Profesyonel Temizleme Onay Modalı */}
           {temizleOnayGoster && (
             <div className="absolute inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-20 p-4">
               <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden">
-                {/* Modal başlık (kırmızı uyarı vurgusu) */}
                 <div className="bg-red-50 p-5 flex flex-col items-center border-b border-red-100">
                   <div className="bg-red-100 w-14 h-14 rounded-full flex items-center justify-center mb-3">
                     <svg xmlns="http://www.w3.org/2000/svg" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#dc2626" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -213,13 +201,11 @@ function SohbetAsistani() {
                   <h3 className="font-bold text-gray-900 text-lg">Sohbeti Temizle</h3>
                 </div>
                 
-                {/* Modal içerik */}
                 <div className="p-5">
                   <p className="text-gray-600 text-sm text-center leading-relaxed mb-5">
                     Tüm mesaj geçmişiniz silinecek ve sohbet sıfırlanacak. Bu işlem geri alınamaz.
                   </p>
                   
-                  {/* Butonlar */}
                   <div className="flex gap-3">
                     <button
                       onClick={() => setTemizleOnayGoster(false)}

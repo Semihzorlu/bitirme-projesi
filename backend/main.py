@@ -51,6 +51,130 @@ def urunleri_getir(db: Session = Depends(get_db)):
     
     return {"toplam": len(urunler_listesi), "urunler": urunler_listesi}
 
+@app.get("/products/search")
+def urun_ara(q: str = "", limit: int = 20, db: Session = Depends(get_db)):
+    """
+    Hibrit arama (Hybrid Search) + Relevance Filtering:
+    - CLIP semantic search (anlamsal benzerlik)
+    - PostgreSQL Full-Text Search (kelime eşleşmesi)
+    - Score threshold ile alakasız sonuçlar elenir
+    
+    Header'daki arama çubuğu için kullanılır.
+    """
+    if not q or not q.strip():
+        return {"mesaj": "Arama metni boş", "sonuclar": []}
+    
+    from vector_service import metin_vektoru_cikar
+    
+    # Eşik değerleri (deneysel olarak bulundu)
+    CLIP_ESIK = 0.62  # CLIP skoru bunun altında ise alakasız sayılır
+    
+    try:
+        # 1. CLIP vektör araması
+        sorgu_vektoru = metin_vektoru_cikar(q)
+        vektor_str = str(sorgu_vektoru)
+        
+        vektor_sql = text("""
+            SELECT id, ad, aciklama, fiyat, kategori, resim_url,
+                   1 - (embedding <=> CAST(:sorgu AS vector)) AS skor
+            FROM urunler
+            WHERE embedding IS NOT NULL
+            ORDER BY embedding <=> CAST(:sorgu AS vector)
+            LIMIT :limit
+        """)
+        
+        vektor_sonuclar = db.execute(
+            vektor_sql, 
+            {"sorgu": vektor_str, "limit": limit * 2}
+        ).fetchall()
+        
+        # 2. PostgreSQL Full-Text Search (sadece gerçek kelime eşleşmesi)
+        metin_sql = text("""
+            SELECT id, ad, aciklama, fiyat, kategori, resim_url,
+                   ts_rank(
+                       to_tsvector('simple', 
+                           coalesce(ad, '') || ' ' || 
+                           coalesce(aciklama, '') || ' ' || 
+                           coalesce(kategori, '')
+                       ),
+                       websearch_to_tsquery('simple', :sorgu)
+                   ) AS skor
+            FROM urunler
+            WHERE to_tsvector('simple', 
+                      coalesce(ad, '') || ' ' || 
+                      coalesce(aciklama, '') || ' ' || 
+                      coalesce(kategori, '')
+                  ) @@ websearch_to_tsquery('simple', :sorgu)
+            ORDER BY skor DESC
+            LIMIT :limit
+        """)
+        
+        try:
+            metin_sonuclar = db.execute(
+                metin_sql, 
+                {"sorgu": q, "limit": limit}
+            ).fetchall()
+        except Exception:
+            metin_sonuclar = []
+        
+        # ===== SCORE FUSION + RELEVANCE FILTERING =====
+        urun_skorlari = {}
+        
+        # FTS sonuçları öncelikli (kelime eşleşmesi → kesin alakalı)
+        for row in metin_sonuclar:
+            urun = {
+                "id": row.id, "ad": row.ad, "aciklama": row.aciklama or "",
+                "fiyat": float(row.fiyat), "kategori": row.kategori or "",
+                "resim": row.resim_url or ""
+            }
+            # FTS eşleşmesi → garantili alakalı
+            urun_skorlari[row.id] = (1.0 + float(row.skor) * 2, urun, "FTS")
+        
+        # Vektör sonuçları (sadece eşik üstü)
+        for row in vektor_sonuclar:
+            clip_skor = float(row.skor)
+            
+            # CLIP eşiğin altında ise reddet (alakasız)
+            if clip_skor < CLIP_ESIK:
+                continue
+            
+            urun = {
+                "id": row.id, "ad": row.ad, "aciklama": row.aciklama or "",
+                "fiyat": float(row.fiyat), "kategori": row.kategori or "",
+                "resim": row.resim_url or ""
+            }
+            
+            if row.id in urun_skorlari:
+                # Hem FTS hem CLIP alakalı buldu → güçlü sinyal, skoru yükselt
+                mevcut, _, _ = urun_skorlari[row.id]
+                urun_skorlari[row.id] = (mevcut + clip_skor, urun, "BOTH")
+            else:
+                # Sadece CLIP buldu → kategori için kabul et
+                urun_skorlari[row.id] = (clip_skor, urun, "CLIP")
+        
+        # Skora göre sırala
+        siralanmis = sorted(
+            urun_skorlari.values(), 
+            key=lambda x: x[0], 
+            reverse=True
+        )
+        
+        sonuclar = [urun for _, urun, _ in siralanmis[:limit]]
+        
+        # Debug için terminal'e yazdır
+        print(f"🔍 Arama: '{q}' → {len(sonuclar)} alakalı ürün")
+        for skor, urun, kaynak in siralanmis[:limit]:
+            print(f"  • [{kaynak}] {urun['ad']} - skor: {round(skor, 3)}")
+        
+        return {
+            "mesaj": f"'{q}' için {len(sonuclar)} ürün bulundu",
+            "arama_metni": q,
+            "sonuclar": sonuclar
+        }
+    
+    except Exception as e:
+        print(f"⚠️ Arama hatası: {e}")
+        return {"mesaj": "Arama yapılamadı", "sonuclar": []}
 
 # ============ SABİT URL ENDPOINTS (parametreli URL'lerden ÖNCE) ============
 # FastAPI route eşleştirmesinde sabit yollar parametrelilerden önce gelmeli
