@@ -8,7 +8,6 @@ import models
 from vector_service import resim_vektoru_cikar
 
 # Tabloları oluştur (varsa atla)
-# Zaten Supabase'de manuel oluşturduk, bu satır güvenlik önlemi
 Base.metadata.create_all(bind=engine)
 
 # FastAPI uygulaması
@@ -24,7 +23,7 @@ app.add_middleware(
 )
 
 
-# ============ API ENDPOINTS ============
+# ============ ANA ENDPOINTS ============
 
 @app.get("/")
 def ana_sayfa():
@@ -37,13 +36,12 @@ def urunleri_getir(db: Session = Depends(get_db)):
     """Tüm ürünleri veritabanından getirir"""
     urunler = db.query(models.Urun).all()
     
-    # SQLAlchemy nesnelerini dict'e çevir (frontend'in anlayacağı formata)
     urunler_listesi = [
         {
             "id": u.id,
             "ad": u.ad,
             "aciklama": u.aciklama,
-            "fiyat": float(u.fiyat),  # DECIMAL → float
+            "fiyat": float(u.fiyat),
             "kategori": u.kategori,
             "resim": u.resim_url,
             "stok_adedi": u.stok_adedi
@@ -54,162 +52,70 @@ def urunleri_getir(db: Session = Depends(get_db)):
     return {"toplam": len(urunler_listesi), "urunler": urunler_listesi}
 
 
-@app.get("/products/{urun_id}")
-def urun_detay(urun_id: int, db: Session = Depends(get_db)):
-    """Belirli bir ürünün detaylarını getirir"""
-    urun = db.query(models.Urun).filter(models.Urun.id == urun_id).first()
-    
-    if not urun:
-        raise HTTPException(status_code=404, detail="Ürün bulunamadı")
-    
-    return {
-        "id": urun.id,
-        "ad": urun.ad,
-        "aciklama": urun.aciklama,
-        "fiyat": float(urun.fiyat),
-        "kategori": urun.kategori,
-        "resim": urun.resim_url,
-        "stok_adedi": urun.stok_adedi
-    }
+# ============ SABİT URL ENDPOINTS (parametreli URL'lerden ÖNCE) ============
+# FastAPI route eşleştirmesinde sabit yollar parametrelilerden önce gelmeli
 
-
-@app.get("/products/kategori/{kategori_adi}")
-def kategoriye_gore_urunler(kategori_adi: str, db: Session = Depends(get_db)):
-    """Belirli bir kategorideki ürünleri döndürür"""
-    urunler = db.query(models.Urun).filter(models.Urun.kategori == kategori_adi).all()
-    
-    return {
-        "kategori": kategori_adi,
-        "toplam": len(urunler),
-        "urunler": [
-            {
-                "id": u.id,
-                "ad": u.ad,
-                "fiyat": float(u.fiyat),
-                "resim": u.resim_url
-            }
-            for u in urunler
-        ]
-    }
-
-
-@app.post("/chat")
-def sohbet(mesaj: dict, db: Session = Depends(get_db)):
+@app.get("/products/trending")
+def trend_urunler(limit: int = 4, gun: int = 7, db: Session = Depends(get_db)):
     """
-    Sohbet asistanı — RAG (CLIP + Gemini + pgvector)
+    Son N günde en çok etkileşim alan ürünleri döndürür.
+    
+    Skorlama:
+    - Görüntüleme: 1 puan
+    - Tıklama: 2 puan
+    - Sepete ekleme: 5 puan (en güçlü sinyal)
+    
+    Anasayfadaki "🔥 Trend Olanlar" bölümü için.
     """
-    kullanici_mesaji = mesaj.get("metin", "").strip()
-    
-    if not kullanici_mesaji:
-        return {"cevap": "Lütfen bir mesaj yaz 😊", "onerilen_urunler": []}
-    
-    from chat_service import sohbet_et
-    sonuc = sohbet_et(kullanici_mesaji, db)
-    
-    return sonuc
-
-@app.post("/visual-search")
-async def gorsel_ara(file: UploadFile = File(...), db: Session = Depends(get_db)):
-    """
-    Yüklenen fotoğrafa en benzer ürünleri bulur.
-    ResNet50 ile vektör çıkarır, pgvector ile benzerlik araması yapar.
-    """
-    # Dosyanın resim olup olmadığını kontrol et
-    if not file.content_type.startswith("image/"):
-        raise HTTPException(status_code=400, detail="Lütfen bir resim dosyası yükle")
-    
-    # Dosyayı oku
-    resim_bytes = await file.read()
-    
-    # Vektörü çıkar
-    try:
-        sorgu_vektoru = resim_vektoru_cikar(resim_bytes)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Resim işlenemedi: {str(e)}")
-    
-    # pgvector ile en benzer 5 ürünü bul
-    # <=> operatörü = cosine distance (0'a yakın = çok benzer)
     sql = text("""
-        SELECT id, ad, aciklama, fiyat, kategori, resim_url,
-               1 - (embedding <=> CAST(:sorgu AS vector)) AS benzerlik
-        FROM urunler
-        WHERE embedding IS NOT NULL
-        ORDER BY embedding <=> CAST(:sorgu AS vector)
-        LIMIT 5
+        SELECT 
+            u.id, u.ad, u.aciklama, u.fiyat, u.kategori, u.resim_url,
+            COUNT(DISTINCT e.oturum_id) AS tekil_kullanici,
+            SUM(
+                CASE 
+                    WHEN e.etkilesim_tipi = 'sepete_ekleme' THEN 5
+                    WHEN e.etkilesim_tipi = 'tiklama' THEN 2
+                    ELSE 1
+                END
+            ) AS trend_skoru
+        FROM etkilesimler e
+        JOIN urunler u ON u.id = e.urun_id
+        WHERE e.tarih > NOW() - (:gun || ' days')::interval
+          AND e.oturum_id IS NOT NULL
+        GROUP BY u.id, u.ad, u.aciklama, u.fiyat, u.kategori, u.resim_url
+        ORDER BY trend_skoru DESC, tekil_kullanici DESC
+        LIMIT :limit
     """)
     
-    # Vektörü PostgreSQL formatına çevir
-    vektor_str = str(sorgu_vektoru)
+    sonuclar = db.execute(sql, {"gun": str(gun), "limit": limit}).fetchall()
     
-    sonuclar = db.execute(sql, {"sorgu": vektor_str}).fetchall()
-    
-    # Sonuçları JSON formatına dönüştür
-    # Ham benzerlik skorlarını topla
-    # Ham benzerlik skorlarını topla
-    ham_sonuclar = [
+    trend_listesi = [
         {
             "id": row.id,
             "ad": row.ad,
-            "aciklama": row.aciklama,
+            "aciklama": row.aciklama or "",
             "fiyat": float(row.fiyat),
-            "kategori": row.kategori,
-            "resim": row.resim_url,
-            "ham_benzerlik": float(row.benzerlik)
+            "kategori": row.kategori or "",
+            "resim": row.resim_url or "",
+            "tekil_kullanici": row.tekil_kullanici,
+            "trend_skoru": row.trend_skoru
         }
         for row in sonuclar
     ]
     
-    # Göreceli benzerlik: En yüksek skoru ~%95'e, en düşüğü ~%50'ye normalize et
-    # Böylece kullanıcıya aradaki farklar daha belirgin gösterilir
-    if ham_sonuclar:
-        en_yuksek = ham_sonuclar[0]["ham_benzerlik"]
-        en_dusuk = min(r["ham_benzerlik"] for r in ham_sonuclar)
-        fark = en_yuksek - en_dusuk
-        
-        benzer_urunler = []
-        for row in ham_sonuclar:
-            if fark < 0.01:
-                # Skorlar birbirine çok yakın → ham değer * 100
-                yuzde = round(row["ham_benzerlik"] * 100, 1)
-            else:
-                # Normalize: en yüksek %95, en düşük %50 civarı
-                normalized = (row["ham_benzerlik"] - en_dusuk) / fark
-                yuzde = round(50 + normalized * 45, 1)
-            
-            benzer_urunler.append({
-                "id": row["id"],
-                "ad": row["ad"],
-                "aciklama": row["aciklama"],
-                "fiyat": row["fiyat"],
-                "kategori": row["kategori"],
-                "resim": row["resim"],
-                "benzerlik": yuzde
-            })
-    else:
-        benzer_urunler = []
-    
     return {
-        "mesaj": f"{len(benzer_urunler)} benzer ürün bulundu",
-        "sonuclar": benzer_urunler
+        "mesaj": f"Son {gun} günün trend ürünleri",
+        "trend_urunler": trend_listesi
     }
+
+
 @app.post("/products/add")
 def yeni_urun_ekle(urun: dict, db: Session = Depends(get_db)):
     """
     Yeni ürün ekler ve otomatik olarak vektörünü oluşturur.
-    
-    Body (JSON):
-    {
-        "ad": "Yeni Mont",
-        "aciklama": "Açıklama...",
-        "fiyat": 899.00,
-        "kategori": "Dış Giyim",
-        "resim_url": "https://...",
-        "stok_adedi": 10
-    }
     """
     from vector_service import url_den_vektor_cikar
     
-    # Zorunlu alanları kontrol et
     gerekli_alanlar = ["ad", "fiyat", "resim_url"]
     for alan in gerekli_alanlar:
         if alan not in urun or not urun[alan]:
@@ -218,7 +124,6 @@ def yeni_urun_ekle(urun: dict, db: Session = Depends(get_db)):
                 detail=f"'{alan}' alanı zorunlu"
             )
     
-    # Yeni ürün nesnesi oluştur
     yeni = models.Urun(
         ad=urun["ad"],
         aciklama=urun.get("aciklama", ""),
@@ -228,7 +133,6 @@ def yeni_urun_ekle(urun: dict, db: Session = Depends(get_db)):
         stok_adedi=urun.get("stok_adedi", 0)
     )
     
-    # Vektörü otomatik oluştur
     print(f"🤖 Yeni ürün için vektör oluşturuluyor: {yeni.ad}")
     vektor = url_den_vektor_cikar(yeni.resim_url)
     
@@ -240,7 +144,6 @@ def yeni_urun_ekle(urun: dict, db: Session = Depends(get_db)):
     
     yeni.embedding = vektor
     
-    # Veritabanına kaydet
     db.add(yeni)
     db.commit()
     db.refresh(yeni)
@@ -260,11 +163,7 @@ def yeni_urun_ekle(urun: dict, db: Session = Depends(get_db)):
 @app.post("/products/refresh-vectors")
 def eksik_vektorleri_olustur(db: Session = Depends(get_db)):
     """
-    Veritabanında vektörü olmayan (embedding=NULL) ürünleri bulur
-    ve otomatik olarak vektörlerini oluşturur.
-    
-    Bu endpoint; Supabase panelinden manuel ürün eklediğinde
-    ya da bir ürünün resim_url'i değiştiğinde kullanılabilir.
+    Vektörü olmayan ürünleri bulur ve otomatik vektör oluşturur.
     """
     from vector_service import url_den_vektor_cikar
     
@@ -300,6 +199,49 @@ def eksik_vektorleri_olustur(db: Session = Depends(get_db)):
         "basarisiz": basarisiz,
         "toplam_islenen": len(eksik_urunler)
     }
+
+
+@app.get("/products/kategori/{kategori_adi}")
+def kategoriye_gore_urunler(kategori_adi: str, db: Session = Depends(get_db)):
+    """Belirli bir kategorideki ürünleri döndürür"""
+    urunler = db.query(models.Urun).filter(models.Urun.kategori == kategori_adi).all()
+    
+    return {
+        "kategori": kategori_adi,
+        "toplam": len(urunler),
+        "urunler": [
+            {
+                "id": u.id,
+                "ad": u.ad,
+                "fiyat": float(u.fiyat),
+                "resim": u.resim_url
+            }
+            for u in urunler
+        ]
+    }
+
+
+# ============ PARAMETRELİ URL ENDPOINTS (sabitlerden SONRA) ============
+
+@app.get("/products/{urun_id}")
+def urun_detay(urun_id: int, db: Session = Depends(get_db)):
+    """Belirli bir ürünün detaylarını getirir"""
+    urun = db.query(models.Urun).filter(models.Urun.id == urun_id).first()
+    
+    if not urun:
+        raise HTTPException(status_code=404, detail="Ürün bulunamadı")
+    
+    return {
+        "id": urun.id,
+        "ad": urun.ad,
+        "aciklama": urun.aciklama,
+        "fiyat": float(urun.fiyat),
+        "kategori": urun.kategori,
+        "resim": urun.resim_url,
+        "stok_adedi": urun.stok_adedi
+    }
+
+
 @app.get("/products/{urun_id}/similar")
 def benzer_urunler(urun_id: int, limit: int = 6, db: Session = Depends(get_db)):
     """
@@ -309,7 +251,6 @@ def benzer_urunler(urun_id: int, limit: int = 6, db: Session = Depends(get_db)):
     1. Aynı kategori (en üstte)
     2. İlişkili kategori (orta)  
     3. Farklı kategori (en altta)
-    Her grup içinde görsel benzerlik skoruna göre sıralanır.
     """
     urun = db.query(models.Urun).filter(models.Urun.id == urun_id).first()
     
@@ -322,7 +263,6 @@ def benzer_urunler(urun_id: int, limit: int = 6, db: Session = Depends(get_db)):
             "benzer_urunler": []
         }
     
-    # Geniş aday havuzu çek (yeniden sıralama için)
     aday_sql = text("""
         SELECT id, ad, aciklama, fiyat, kategori, resim_url,
                1 - (embedding <=> (
@@ -342,7 +282,6 @@ def benzer_urunler(urun_id: int, limit: int = 6, db: Session = Depends(get_db)):
         {"urun_id": urun_id, "geniş_limit": limit * 4}
     ).fetchall()
     
-    # Kategori grupları
     kategori_gruplari = {
         "Üst Giyim": ["Üst Giyim", "Dış Giyim"],
         "Alt Giyim": ["Alt Giyim"],
@@ -354,7 +293,6 @@ def benzer_urunler(urun_id: int, limit: int = 6, db: Session = Depends(get_db)):
     hedef_kategori = urun.kategori
     iliski_kategorileri = kategori_gruplari.get(hedef_kategori, [hedef_kategori])
     
-    # Adayları kategori uyumuna göre 3 gruba ayır
     ayni_kategori = []
     iliskili_kategori = []
     farkli_kategori = []
@@ -379,29 +317,20 @@ def benzer_urunler(urun_id: int, limit: int = 6, db: Session = Depends(get_db)):
         else:
             farkli_kategori.append(urun_dict)
     
-    # Her grup içinde görsel skora göre sırala
     ayni_kategori.sort(key=lambda x: x["ham_skor"], reverse=True)
     iliskili_kategori.sort(key=lambda x: x["ham_skor"], reverse=True)
     farkli_kategori.sort(key=lambda x: x["ham_skor"], reverse=True)
     
-    # Grupları birleştir: önce aynı kategori, sonra ilişkili, sonra farklı
     siralanmis = ayni_kategori + iliskili_kategori + farkli_kategori
     siralanmis = siralanmis[:limit]
     
-    # Yüzdeleri normalize et
-    # Aynı kategori → 75-95 arası
-    # İlişkili kategori → 55-75 arası
-    # Farklı kategori → 35-55 arası
     sonuc = []
     for urun_dict in siralanmis:
         if urun_dict in ayni_kategori:
-            # Aynı kategori grubu için 75-95 aralığı
             yuzde = 75 + (urun_dict["ham_skor"] * 20)
         elif urun_dict in iliskili_kategori:
-            # İlişkili kategori için 55-75 aralığı
             yuzde = 55 + (urun_dict["ham_skor"] * 20)
         else:
-            # Farklı kategori için 35-55 aralığı
             yuzde = 35 + (urun_dict["ham_skor"] * 20)
         
         sonuc.append({
@@ -411,67 +340,19 @@ def benzer_urunler(urun_id: int, limit: int = 6, db: Session = Depends(get_db)):
             "fiyat": urun_dict["fiyat"],
             "kategori": urun_dict["kategori"],
             "resim": urun_dict["resim"],
-            "benzerlik": round(min(yuzde, 95), 1)  # Max %95 (asla %100)
+            "benzerlik": round(min(yuzde, 95), 1)
         })
     
     return {
         "mesaj": f"{len(sonuc)} benzer ürün bulundu",
         "benzer_urunler": sonuc
     }
-@app.post("/interactions/track")
-def etkilesim_kaydet(veri: dict, db: Session = Depends(get_db)):
-    """
-    Kullanıcı etkileşimini kaydeder.
-    Body: { "oturum_id": "uuid", "urun_id": 1, "etkilesim_tipi": "goruntuleme" }
-    
-    Etkileşim tipleri: 'goruntuleme', 'tiklama', 'sepete_ekleme'
-    """
-    oturum_id = veri.get("oturum_id")
-    urun_id = veri.get("urun_id")
-    etkilesim_tipi = veri.get("etkilesim_tipi", "goruntuleme")
-    
-    if not oturum_id or not urun_id:
-        raise HTTPException(status_code=400, detail="oturum_id ve urun_id gerekli")
-    
-    # Aynı oturum aynı ürünü 5 dakika içinde tekrar görüntülemişse kaydetme
-    # (sayfa yenilemelerinde mükerrer kayıt olmasın)
-    son_etkilesim = db.execute(text("""
-        SELECT id FROM etkilesimler
-        WHERE oturum_id = :oturum_id 
-          AND urun_id = :urun_id 
-          AND etkilesim_tipi = :tipi
-          AND tarih > NOW() - INTERVAL '5 minutes'
-        LIMIT 1
-    """), {
-        "oturum_id": oturum_id,
-        "urun_id": urun_id,
-        "tipi": etkilesim_tipi
-    }).fetchone()
-    
-    if son_etkilesim:
-        return {"mesaj": "Yakın zamanda kaydedilmiş, atlandı", "kaydedildi": False}
-    
-    # Yeni etkileşimi ekle
-    yeni_etkilesim = models.Etkilesim(
-        oturum_id=oturum_id,
-        urun_id=urun_id,
-        etkilesim_tipi=etkilesim_tipi
-    )
-    db.add(yeni_etkilesim)
-    db.commit()
-    
-    return {"mesaj": "Etkileşim kaydedildi", "kaydedildi": True}
 
 
 @app.get("/products/{urun_id}/also-viewed")
 def beraber_incelenenler(urun_id: int, limit: int = 6, db: Session = Depends(get_db)):
     """
-    "Bu ürünü inceleyenler şunları da inceledi" - Collaborative filtering.
-    
-    Mantık:
-    1. Bu ürünü görüntüleyen oturumları bul
-    2. O oturumların görüntülediği DİĞER ürünleri al
-    3. En çok ortak görüntülenen ürünleri sırala
+    "Bu ürünü inceleyenler şunları da inceledi" - Item-Item Collaborative Filtering.
     """
     sql = text("""
         WITH bu_urunu_gorenler AS (
@@ -511,3 +392,133 @@ def beraber_incelenenler(urun_id: int, limit: int = 6, db: Session = Depends(get
         "mesaj": f"{len(beraber_urunler)} ürün bulundu",
         "beraber_incelenenler": beraber_urunler
     }
+
+
+# ============ DİĞER POST ENDPOINTS ============
+
+@app.post("/chat")
+def sohbet(mesaj: dict, db: Session = Depends(get_db)):
+    """
+    Sohbet asistanı — RAG (CLIP + Gemini + pgvector)
+    """
+    kullanici_mesaji = mesaj.get("metin", "").strip()
+    
+    if not kullanici_mesaji:
+        return {"cevap": "Lütfen bir mesaj yaz 😊", "onerilen_urunler": []}
+    
+    sonuc = sohbet_et(kullanici_mesaji, db)
+    
+    return sonuc
+
+
+@app.post("/visual-search")
+async def gorsel_ara(file: UploadFile = File(...), db: Session = Depends(get_db)):
+    """
+    Yüklenen fotoğrafa en benzer ürünleri bulur.
+    CLIP ile vektör çıkarır, pgvector ile benzerlik araması yapar.
+    """
+    if not file.content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="Lütfen bir resim dosyası yükle")
+    
+    resim_bytes = await file.read()
+    
+    try:
+        sorgu_vektoru = resim_vektoru_cikar(resim_bytes)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Resim işlenemedi: {str(e)}")
+    
+    sql = text("""
+        SELECT id, ad, aciklama, fiyat, kategori, resim_url,
+               1 - (embedding <=> CAST(:sorgu AS vector)) AS benzerlik
+        FROM urunler
+        WHERE embedding IS NOT NULL
+        ORDER BY embedding <=> CAST(:sorgu AS vector)
+        LIMIT 5
+    """)
+    
+    vektor_str = str(sorgu_vektoru)
+    sonuclar = db.execute(sql, {"sorgu": vektor_str}).fetchall()
+    
+    ham_sonuclar = [
+        {
+            "id": row.id,
+            "ad": row.ad,
+            "aciklama": row.aciklama,
+            "fiyat": float(row.fiyat),
+            "kategori": row.kategori,
+            "resim": row.resim_url,
+            "ham_benzerlik": float(row.benzerlik)
+        }
+        for row in sonuclar
+    ]
+    
+    if ham_sonuclar:
+        en_yuksek = ham_sonuclar[0]["ham_benzerlik"]
+        en_dusuk = min(r["ham_benzerlik"] for r in ham_sonuclar)
+        fark = en_yuksek - en_dusuk
+        
+        benzer_urunler = []
+        for row in ham_sonuclar:
+            if fark < 0.01:
+                yuzde = round(row["ham_benzerlik"] * 100, 1)
+            else:
+                normalized = (row["ham_benzerlik"] - en_dusuk) / fark
+                yuzde = round(50 + normalized * 45, 1)
+            
+            benzer_urunler.append({
+                "id": row["id"],
+                "ad": row["ad"],
+                "aciklama": row["aciklama"],
+                "fiyat": row["fiyat"],
+                "kategori": row["kategori"],
+                "resim": row["resim"],
+                "benzerlik": yuzde
+            })
+    else:
+        benzer_urunler = []
+    
+    return {
+        "mesaj": f"{len(benzer_urunler)} benzer ürün bulundu",
+        "sonuclar": benzer_urunler
+    }
+
+
+@app.post("/interactions/track")
+def etkilesim_kaydet(veri: dict, db: Session = Depends(get_db)):
+    """
+    Kullanıcı etkileşimini kaydeder.
+    Etkileşim tipleri: 'goruntuleme', 'tiklama', 'sepete_ekleme'
+    """
+    oturum_id = veri.get("oturum_id")
+    urun_id = veri.get("urun_id")
+    etkilesim_tipi = veri.get("etkilesim_tipi", "goruntuleme")
+    
+    if not oturum_id or not urun_id:
+        raise HTTPException(status_code=400, detail="oturum_id ve urun_id gerekli")
+    
+    # Aynı oturum aynı ürünü 5 dakika içinde tekrar görüntülemişse kaydetme
+    son_etkilesim = db.execute(text("""
+        SELECT id FROM etkilesimler
+        WHERE oturum_id = :oturum_id 
+          AND urun_id = :urun_id 
+          AND etkilesim_tipi = :tipi
+          AND tarih > NOW() - INTERVAL '5 minutes'
+        LIMIT 1
+    """), {
+        "oturum_id": oturum_id,
+        "urun_id": urun_id,
+        "tipi": etkilesim_tipi
+    }).fetchone()
+    
+    if son_etkilesim:
+        return {"mesaj": "Yakın zamanda kaydedilmiş, atlandı", "kaydedildi": False}
+    
+    yeni_etkilesim = models.Etkilesim(
+        oturum_id=oturum_id,
+        urun_id=urun_id,
+        etkilesim_tipi=etkilesim_tipi
+    )
+    db.add(yeni_etkilesim)
+    db.commit()
+    
+    return {"mesaj": "Etkileşim kaydedildi", "kaydedildi": True}

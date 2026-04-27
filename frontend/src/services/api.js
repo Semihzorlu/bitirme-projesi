@@ -134,3 +134,20 @@ export async function beraberIncelenenleriGetir(urunId, limit = 6) {
     return [];
   }
 }
+/**
+ * Trend olan ürünleri getir
+ * @param {number} limit - Kaç ürün
+ * @param {number} gun - Son N gün içindeki etkileşimler
+ */
+export async function trendUrunleriGetir(limit = 4, gun = 7) {
+  try {
+    const response = await fetch(
+      `${API_URL}/products/trending?limit=${limit}&gun=${gun}`
+    );
+    const data = await response.json();
+    return data.trend_urunler || [];
+  } catch (error) {
+    console.error('Trend ürünler alınamadı:', error);
+    return [];
+  }
+}
